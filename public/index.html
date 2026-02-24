@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AnonymChat • Fixed Version</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="chat-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <i class="fas fa-comment-dots"></i>
+                <h2>AnonymChat</h2>
+                <span class="online-badge" id="onlineCount">0 online</span>
+            </div>
+            <div class="users-list">
+                <h4><i class="fas fa-users"></i> Active Users</h4>
+                <div id="activeUsers">
+                    <p class="no-users">Loading users...</p>
+                </div>
+            </div>
+            <div class="sidebar-footer">
+                <i class="fas fa-shield-alt"></i>
+                <span>Fixed Version • Working on Vercel</span>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="main-chat">
+            <div class="chat-header">
+                <div class="user-info">
+                    <i class="fas fa-user-circle"></i>
+                    <span id="myUsername">Joining...</span>
+                </div>
+                <div class="header-actions">
+                    <span class="connection-status" id="connectionStatus">
+                        <i class="fas fa-circle" style="color: #f39c12;"></i> Connecting
+                    </span>
+                </div>
+            </div>
+
+            <div class="messages-area" id="messagesArea">
+                <div class="welcome-message">
+                    <i class="fas fa-hand-peace"></i>
+                    <h3>Welcome to AnonymChat!</h3>
+                    <p>Fixed version - 100% working on Vercel</p>
+                </div>
+            </div>
+
+            <div class="typing-indicator" id="typingIndicator"></div>
+
+            <div class="input-area">
+                <form id="messageForm">
+                    <input type="text" id="messageInput" placeholder="Type your message..." autocomplete="off">
+                    <button type="submit" id="sendButton">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
