@@ -1,110 +1,116 @@
-// State
+// State Management
 let myUser = null;
 let lastMessageId = 0;
+let isDarkMode = false;
+let isSidebarCollapsed = false;
+let isMobileMenuOpen = false;
+let typingTimeout;
 
 // DOM Elements
+const sidebar = document.getElementById('sidebar');
 const messagesArea = document.getElementById('messagesArea');
 const messageForm = document.getElementById('messageForm');
 const messageInput = document.getElementById('messageInput');
 const myUsernameSpan = document.getElementById('myUsername');
+const myStatus = document.getElementById('myStatus');
 const onlineCountSpan = document.getElementById('onlineCount');
 const activeUsersDiv = document.getElementById('activeUsers');
 const connectionStatus = document.getElementById('connectionStatus');
+const typingIndicator = document.getElementById('typingIndicator');
+const scrollBottomBtn = document.getElementById('scrollBottomBtn');
+const themeToggle = document.getElementById('themeToggle');
+const sidebarToggle = document.getElementById('sidebarToggle');
+const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+const emojiBtn = document.getElementById('emojiBtn');
+const emojiPicker = document.getElementById('emojiPicker');
+
+// API Endpoint
+const API_URL = '/api/index';
 
 // Initialize
 async function init() {
     try {
-        updateStatus('Connecting...', '#f39c12');
+        updateConnectionStatus('Connecting...', '#f59e0b');
         
-        // Join as new user
-        const joinRes = await fetch('/api/index', {
+        const joinRes = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'join' })
         });
         
-        if (!joinRes.ok) {
-            throw new Error(`HTTP error! status: ${joinRes.status}`);
-        }
+        if (!joinRes.ok) throw new Error(`HTTP ${joinRes.status}`);
         
         const joinData = await joinRes.json();
         
         if (joinData.success) {
             myUser = joinData.user;
             myUsernameSpan.textContent = myUser.name;
-            updateStatus('Connected', '#27ae60');
+            updateConnectionStatus('Connected', '#10b981');
             
-            // Update users list
             updateUsersList(joinData.users, joinData.onlineCount);
             
-            // Start polling
+            // Start services
             startPolling();
             startHeartbeat();
             
-            addSystemMessage(`✨ Welcome ${myUser.name}! You're connected.`);
+            addSystemMessage(`👋 Welcome ${myUser.name}!`);
         }
     } catch (error) {
         console.error('Init error:', error);
-        updateStatus('Connection failed', '#e74c3c');
-        addSystemMessage('❌ Failed to connect. Refreshing...');
-        
-        // Retry after 3 seconds
-        setTimeout(() => {
-            window.location.reload();
-        }, 3000);
+        updateConnectionStatus('Connection failed', '#ef4444');
+        addSystemMessage('❌ Connection failed. Retrying...');
+        setTimeout(init, 3000);
     }
 }
 
-// Poll for new messages
+// Polling for messages
 function startPolling() {
     const poll = async () => {
         try {
-            const res = await fetch(`/api/index?lastId=${lastMessageId}`, {
+            const res = await fetch(`${API_URL}?lastId=${lastMessageId}`, {
                 method: 'GET',
                 headers: { 'Cache-Control': 'no-cache' }
             });
             
-            if (!res.ok) {
-                throw new Error(`HTTP error! status: ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             
             const data = await res.json();
             
             if (data.success) {
                 // Update messages
-                if (data.messages && data.messages.length > 0) {
+                if (data.messages?.length) {
                     data.messages.forEach(msg => {
                         const isOwn = msg.userName === myUser?.name;
-                        addMessage(msg.userName, msg.message, msg.time, isOwn, msg.isSystem);
+                        const isSystem = msg.isSystem || msg.userName === '💬 System';
+                        addMessage(msg.userName, msg.message, msg.time, isOwn, isSystem);
                         lastMessageId = Math.max(lastMessageId, msg.id);
                     });
                 }
                 
-                // Update users and online count
+                // Update users
                 if (data.users) {
                     updateUsersList(data.users, data.onlineCount);
                 }
                 
-                updateStatus('Connected', '#27ae60');
+                updateConnectionStatus('Connected', '#10b981');
             }
         } catch (error) {
             console.error('Poll error:', error);
-            updateStatus('Reconnecting...', '#f39c12');
+            updateConnectionStatus('Reconnecting...', '#f59e0b');
         }
         
-        // Poll every 1 second
         setTimeout(poll, 1000);
     };
     
     poll();
 }
 
-// Heartbeat every 30 seconds
+// Heartbeat
 function startHeartbeat() {
     setInterval(async () => {
         if (myUser) {
             try {
-                await fetch('/api/index', {
+                await fetch(API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
@@ -126,11 +132,10 @@ messageForm.addEventListener('submit', async (e) => {
     const message = messageInput.value.trim();
     if (!message || !myUser) return;
     
-    // Disable input temporarily
     messageInput.disabled = true;
     
     try {
-        const res = await fetch('/api/index', {
+        const res = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -140,9 +145,7 @@ messageForm.addEventListener('submit', async (e) => {
             })
         });
         
-        if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         
         const data = await res.json();
         if (data.success) {
@@ -157,44 +160,29 @@ messageForm.addEventListener('submit', async (e) => {
     }
 });
 
-// Helper Functions
-function updateStatus(text, color) {
-    if (connectionStatus) {
-        connectionStatus.innerHTML = `<i class="fas fa-circle" style="color: ${color}"></i> ${text}`;
-    }
-}
-
-function updateUsersList(users, count) {
-    if (onlineCountSpan) {
-        onlineCountSpan.textContent = `${count || 0} online`;
-    }
+// Typing indicator
+messageInput.addEventListener('input', () => {
+    if (!myUser) return;
     
-    if (activeUsersDiv && users) {
-        let html = '';
-        users.forEach(user => {
-            const isMe = user.name === myUser?.name;
-            html += `
-                <div class="user-item">
-                    <i class="fas fa-circle" style="color: ${isMe ? '#27ae60' : '#3498db'}; font-size: 8px;"></i>
-                    <span>${escapeHtml(user.name)}${isMe ? ' (You)' : ''}</span>
-                </div>
-            `;
-        });
-        
-        if (users.length === 0) {
-            html = '<p class="no-users">No users online</p>';
-        }
-        
-        activeUsersDiv.innerHTML = html;
-    }
-}
+    // Show local typing indicator
+    typingIndicator.textContent = 'You are typing...';
+    
+    clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+        typingIndicator.textContent = '';
+    }, 1000);
+});
 
+// Add message to UI
 function addMessage(userName, message, time, isOwn = false, isSystem = false) {
     const messageDiv = document.createElement('div');
     
     if (isSystem) {
-        messageDiv.className = 'system-message';
-        messageDiv.innerHTML = `<i class="fas fa-info-circle"></i> ${escapeHtml(message)}`;
+        messageDiv.className = 'message system';
+        messageDiv.innerHTML = `
+            <i class="fas fa-info-circle"></i>
+            ${escapeHtml(message)}
+        `;
     } else {
         messageDiv.className = `message ${isOwn ? 'own' : 'other'}`;
         messageDiv.innerHTML = `
@@ -208,20 +196,140 @@ function addMessage(userName, message, time, isOwn = false, isSystem = false) {
     
     messagesArea.appendChild(messageDiv);
     scrollToBottom();
+    
+    // Show scroll button if not at bottom
+    checkScroll();
 }
 
+// Add system message
 function addSystemMessage(text) {
     const systemDiv = document.createElement('div');
-    systemDiv.className = 'system-message';
+    systemDiv.className = 'message system';
     systemDiv.innerHTML = `<i class="fas fa-info-circle"></i> ${escapeHtml(text)}`;
     messagesArea.appendChild(systemDiv);
     scrollToBottom();
 }
 
+// Update users list
+function updateUsersList(users, count) {
+    onlineCountSpan.textContent = count || 0;
+    
+    if (!activeUsersDiv || !users) return;
+    
+    if (users.length === 0) {
+        activeUsersDiv.innerHTML = '<div class="loading-users">No users online</div>';
+        return;
+    }
+    
+    let html = '';
+    users.forEach(user => {
+        const isMe = user.name === myUser?.name;
+        html += `
+            <div class="user-item">
+                <i class="fas fa-circle" style="color: ${isMe ? '#10b981' : '#6366f1'};"></i>
+                <span>${escapeHtml(user.name)}${isMe ? ' (You)' : ''}</span>
+            </div>
+        `;
+    });
+    
+    activeUsersDiv.innerHTML = html;
+}
+
+// Update connection status
+function updateConnectionStatus(text, color) {
+    if (connectionStatus) {
+        connectionStatus.innerHTML = `
+            <i class="fas fa-circle" style="color: ${color}"></i>
+            <span>${text}</span>
+        `;
+    }
+    
+    if (myStatus) {
+        myStatus.innerHTML = `<i class="fas fa-circle" style="color: ${color}"></i> ${text}`;
+    }
+}
+
+// Scroll functions
 function scrollToBottom() {
     messagesArea.scrollTop = messagesArea.scrollHeight;
 }
 
+function checkScroll() {
+    const isNearBottom = messagesArea.scrollHeight - messagesArea.scrollTop - messagesArea.clientHeight < 100;
+    
+    if (!isNearBottom) {
+        scrollBottomBtn.classList.add('visible');
+    } else {
+        scrollBottomBtn.classList.remove('visible');
+    }
+}
+
+messagesArea.addEventListener('scroll', checkScroll);
+
+scrollBottomBtn.addEventListener('click', () => {
+    messagesArea.scrollTo({
+        top: messagesArea.scrollHeight,
+        behavior: 'smooth'
+    });
+});
+
+// Theme toggle
+themeToggle.addEventListener('click', () => {
+    isDarkMode = !isDarkMode;
+    document.body.classList.toggle('dark-mode');
+    themeToggle.innerHTML = isDarkMode ? 
+        '<i class="fas fa-sun"></i>' : 
+        '<i class="fas fa-moon"></i>';
+});
+
+// Sidebar toggle
+sidebarToggle.addEventListener('click', () => {
+    isSidebarCollapsed = !isSidebarCollapsed;
+    sidebar.classList.toggle('collapsed');
+    sidebarToggle.innerHTML = isSidebarCollapsed ?
+        '<i class="fas fa-chevron-right"></i>' :
+        '<i class="fas fa-chevron-left"></i>';
+});
+
+// Mobile menu
+mobileMenuBtn.addEventListener('click', () => {
+    isMobileMenuOpen = !isMobileMenuOpen;
+    sidebar.classList.toggle('show');
+});
+
+// Close sidebar when clicking outside on mobile
+document.addEventListener('click', (e) => {
+    if (window.innerWidth <= 768 && 
+        isMobileMenuOpen && 
+        !sidebar.contains(e.target) && 
+        !mobileMenuBtn.contains(e.target)) {
+        sidebar.classList.remove('show');
+        isMobileMenuOpen = false;
+    }
+});
+
+// Emoji picker
+emojiBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    emojiPicker.classList.toggle('show');
+});
+
+document.addEventListener('click', (e) => {
+    if (!emojiPicker.contains(e.target) && !emojiBtn.contains(e.target)) {
+        emojiPicker.classList.remove('show');
+    }
+});
+
+// Emoji selection
+document.querySelectorAll('.emoji-grid span').forEach(emoji => {
+    emoji.addEventListener('click', () => {
+        messageInput.value += emoji.textContent;
+        messageInput.focus();
+        emojiPicker.classList.remove('show');
+    });
+});
+
+// Escape HTML
 function escapeHtml(unsafe) {
     if (!unsafe) return '';
     return unsafe
@@ -236,7 +344,7 @@ function escapeHtml(unsafe) {
 window.addEventListener('beforeunload', async () => {
     if (myUser) {
         try {
-            await fetch('/api/index', {
+            await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
@@ -251,5 +359,5 @@ window.addEventListener('beforeunload', async () => {
     }
 });
 
-// Start the app
+// Start app
 init();
