@@ -1,9 +1,6 @@
-// Configuration
-const API_BASE = '/api';
+// State
 let myUser = null;
 let lastMessageId = 0;
-let isTyping = false;
-let typingTimeout;
 
 // DOM Elements
 const messagesArea = document.getElementById('messagesArea');
@@ -12,33 +9,49 @@ const messageInput = document.getElementById('messageInput');
 const myUsernameSpan = document.getElementById('myUsername');
 const onlineCountSpan = document.getElementById('onlineCount');
 const activeUsersDiv = document.getElementById('activeUsers');
-const typingIndicator = document.getElementById('typingIndicator');
 const connectionStatus = document.getElementById('connectionStatus');
 
 // Initialize
 async function init() {
     try {
+        updateStatus('Connecting...', '#f39c12');
+        
         // Join as new user
-        const joinRes = await fetch(`${API_BASE}/users`, {
+        const joinRes = await fetch('/api/index', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'join' })
         });
         
+        if (!joinRes.ok) {
+            throw new Error(`HTTP error! status: ${joinRes.status}`);
+        }
+        
         const joinData = await joinRes.json();
+        
         if (joinData.success) {
             myUser = joinData.user;
             myUsernameSpan.textContent = myUser.name;
-            updateConnectionStatus(true);
-            addSystemMessage(`✨ Welcome ${myUser.name}!`);
+            updateStatus('Connected', '#27ae60');
+            
+            // Update users list
+            updateUsersList(joinData.users, joinData.onlineCount);
             
             // Start polling
             startPolling();
             startHeartbeat();
-            loadActiveUsers();
+            
+            addSystemMessage(`✨ Welcome ${myUser.name}! You're connected.`);
         }
     } catch (error) {
         console.error('Init error:', error);
-        updateConnectionStatus(false);
+        updateStatus('Connection failed', '#e74c3c');
+        addSystemMessage('❌ Failed to connect. Refreshing...');
+        
+        // Retry after 3 seconds
+        setTimeout(() => {
+            window.location.reload();
+        }, 3000);
     }
 }
 
@@ -46,21 +59,37 @@ async function init() {
 function startPolling() {
     const poll = async () => {
         try {
-            const res = await fetch(`${API_BASE}/messages?lastId=${lastMessageId}`);
-            const data = await res.json();
+            const res = await fetch(`/api/index?lastId=${lastMessageId}`, {
+                method: 'GET',
+                headers: { 'Cache-Control': 'no-cache' }
+            });
             
-            if (data.success && data.messages.length > 0) {
-                data.messages.forEach(msg => {
-                    const isOwn = msg.userName === myUser?.name;
-                    addMessage(msg.userName, msg.message, msg.time, isOwn);
-                    lastMessageId = Math.max(lastMessageId, msg.id);
-                });
+            if (!res.ok) {
+                throw new Error(`HTTP error! status: ${res.status}`);
             }
             
-            updateConnectionStatus(true);
+            const data = await res.json();
+            
+            if (data.success) {
+                // Update messages
+                if (data.messages && data.messages.length > 0) {
+                    data.messages.forEach(msg => {
+                        const isOwn = msg.userName === myUser?.name;
+                        addMessage(msg.userName, msg.message, msg.time, isOwn, msg.isSystem);
+                        lastMessageId = Math.max(lastMessageId, msg.id);
+                    });
+                }
+                
+                // Update users and online count
+                if (data.users) {
+                    updateUsersList(data.users, data.onlineCount);
+                }
+                
+                updateStatus('Connected', '#27ae60');
+            }
         } catch (error) {
             console.error('Poll error:', error);
-            updateConnectionStatus(false);
+            updateStatus('Reconnecting...', '#f39c12');
         }
         
         // Poll every 1 second
@@ -70,57 +99,24 @@ function startPolling() {
     poll();
 }
 
-// Send heartbeat every 30 seconds
+// Heartbeat every 30 seconds
 function startHeartbeat() {
     setInterval(async () => {
         if (myUser) {
             try {
-                await fetch(`${API_BASE}/users?userId=${myUser.id}`, {
-                    method: 'PUT'
+                await fetch('/api/index', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        action: 'heartbeat', 
+                        userName: myUser.name 
+                    })
                 });
             } catch (error) {
                 console.error('Heartbeat error:', error);
             }
         }
     }, 30000);
-}
-
-// Load active users
-async function loadActiveUsers() {
-    const load = async () => {
-        try {
-            const res = await fetch(`${API_BASE}/users`);
-            const data = await res.json();
-            
-            if (data.success) {
-                onlineCountSpan.textContent = `${data.count} online`;
-                
-                // Update users list
-                let html = '';
-                data.users.forEach(user => {
-                    const isMe = user.id === myUser?.id;
-                    html += `
-                        <div class="user-item">
-                            <i class="fas fa-circle" style="color: ${isMe ? '#27ae60' : '#3498db'}"></i>
-                            <span>${user.name}${isMe ? ' (You)' : ''}</span>
-                        </div>
-                    `;
-                });
-                
-                if (data.users.length === 0) {
-                    html = '<p class="no-users">No users online</p>';
-                }
-                
-                activeUsersDiv.innerHTML = html;
-            }
-        } catch (error) {
-            console.error('Load users error:', error);
-        }
-        
-        setTimeout(load, 5000);
-    };
-    
-    load();
 }
 
 // Send message
@@ -130,15 +126,23 @@ messageForm.addEventListener('submit', async (e) => {
     const message = messageInput.value.trim();
     if (!message || !myUser) return;
     
+    // Disable input temporarily
+    messageInput.disabled = true;
+    
     try {
-        const res = await fetch(`${API_BASE}/messages`, {
+        const res = await fetch('/api/index', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                action: 'send',
                 userName: myUser.name,
                 message: message
             })
         });
+        
+        if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+        }
         
         const data = await res.json();
         if (data.success) {
@@ -146,36 +150,61 @@ messageForm.addEventListener('submit', async (e) => {
         }
     } catch (error) {
         console.error('Send error:', error);
-        alert('Failed to send message. Check connection.');
+        addSystemMessage('❌ Failed to send message');
+    } finally {
+        messageInput.disabled = false;
+        messageInput.focus();
     }
 });
 
-// Typing indicator
-messageInput.addEventListener('input', () => {
-    if (!isTyping) {
-        isTyping = true;
-        // In a real app, you'd broadcast typing status
-        // For now, we'll just show local indicator
+// Helper Functions
+function updateStatus(text, color) {
+    if (connectionStatus) {
+        connectionStatus.innerHTML = `<i class="fas fa-circle" style="color: ${color}"></i> ${text}`;
+    }
+}
+
+function updateUsersList(users, count) {
+    if (onlineCountSpan) {
+        onlineCountSpan.textContent = `${count || 0} online`;
     }
     
-    clearTimeout(typingTimeout);
-    typingTimeout = setTimeout(() => {
-        isTyping = false;
-    }, 1000);
-});
+    if (activeUsersDiv && users) {
+        let html = '';
+        users.forEach(user => {
+            const isMe = user.name === myUser?.name;
+            html += `
+                <div class="user-item">
+                    <i class="fas fa-circle" style="color: ${isMe ? '#27ae60' : '#3498db'}; font-size: 8px;"></i>
+                    <span>${escapeHtml(user.name)}${isMe ? ' (You)' : ''}</span>
+                </div>
+            `;
+        });
+        
+        if (users.length === 0) {
+            html = '<p class="no-users">No users online</p>';
+        }
+        
+        activeUsersDiv.innerHTML = html;
+    }
+}
 
-// Functions
-function addMessage(userName, message, time, isOwn = false) {
+function addMessage(userName, message, time, isOwn = false, isSystem = false) {
     const messageDiv = document.createElement('div');
-    messageDiv.className = `message ${isOwn ? 'own' : 'other'}`;
     
-    messageDiv.innerHTML = `
-        <div class="message-header">
-            <span class="message-user">${escapeHtml(userName)}</span>
-            <span class="message-time">${time}</span>
-        </div>
-        <div class="message-content">${escapeHtml(message)}</div>
-    `;
+    if (isSystem) {
+        messageDiv.className = 'system-message';
+        messageDiv.innerHTML = `<i class="fas fa-info-circle"></i> ${escapeHtml(message)}`;
+    } else {
+        messageDiv.className = `message ${isOwn ? 'own' : 'other'}`;
+        messageDiv.innerHTML = `
+            <div class="message-header">
+                <span class="message-user">${escapeHtml(userName)}</span>
+                <span class="message-time">${time}</span>
+            </div>
+            <div class="message-content">${escapeHtml(message)}</div>
+        `;
+    }
     
     messagesArea.appendChild(messageDiv);
     scrollToBottom();
@@ -183,25 +212,10 @@ function addMessage(userName, message, time, isOwn = false) {
 
 function addSystemMessage(text) {
     const systemDiv = document.createElement('div');
-    systemDiv.style.cssText = `
-        text-align: center;
-        color: #95a5a6;
-        font-size: 12px;
-        margin: 10px 0;
-        font-style: italic;
-        animation: fadeIn 0.3s ease;
-    `;
-    systemDiv.textContent = text;
+    systemDiv.className = 'system-message';
+    systemDiv.innerHTML = `<i class="fas fa-info-circle"></i> ${escapeHtml(text)}`;
     messagesArea.appendChild(systemDiv);
     scrollToBottom();
-}
-
-function updateConnectionStatus(connected) {
-    if (connected) {
-        connectionStatus.innerHTML = '<i class="fas fa-circle" style="color: #27ae60;"></i> Connected';
-    } else {
-        connectionStatus.innerHTML = '<i class="fas fa-circle" style="color: #e74c3c;"></i> Disconnected';
-    }
 }
 
 function scrollToBottom() {
@@ -209,6 +223,7 @@ function scrollToBottom() {
 }
 
 function escapeHtml(unsafe) {
+    if (!unsafe) return '';
     return unsafe
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
@@ -217,16 +232,21 @@ function escapeHtml(unsafe) {
         .replace(/'/g, "&#039;");
 }
 
-// Handle page unload
+// Leave on page unload
 window.addEventListener('beforeunload', async () => {
     if (myUser) {
         try {
-            await fetch(`${API_BASE}/users?userId=${myUser.id}`, {
-                method: 'DELETE',
+            await fetch('/api/index', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: 'leave', 
+                    userName: myUser.name 
+                }),
                 keepalive: true
             });
         } catch (error) {
-            console.error('Cleanup error:', error);
+            console.error('Leave error:', error);
         }
     }
 });

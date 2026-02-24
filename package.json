@@ -1,12 +1,8 @@
 {
-  "name": "anonym-chat-fixed",
-  "version": "2.0.0",
-  "description": "Anonymous chat working on Vercel",
+  "name": "anonym-chat-final",
+  "version": "3.0.0",
+  "description": "Anonymous chat for Vercel",
   "scripts": {
     "dev": "vercel dev"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5"
   }
 }
