@@ -17,7 +17,6 @@
     },
     {
       "src": "/(.*)",
-      "use": "@vercel/static",
       "dest": "/public/$1"
     }
   ]
